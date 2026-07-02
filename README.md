@@ -1,137 +1,117 @@
-# Android Penetration Testing
+# JWT Security Analyzer
 
-## Tools
+A command-line tool that decodes a JSON Web Token and analyzes it for common
+security weaknesses: `alg:none`, weak/brute-forceable HMAC secrets, missing
+or excessive expiration, sensitive data in the payload, header injection
+vectors (`jku`, `jwk`, `kid`), and algorithm-confusion risk. Produces a
+risk-scored report with remediation guidance.
 
-```bash
-1. Android Emulator
-2. Jadx
-3. Apk Tool
-4. ADB Tools
-5. Frida
-6. Objection
-7. MobSF
-8. BurpSuite
-9. rootAVD/Magisk
-10. Drozer
-```
+> **Scope note:** this tool only *inspects* tokens you already have (decoding
+> and, for HS* tokens, testing against a small local wordlist of known-weak
+> secrets). It does not attack a live server, intercept traffic, or bypass
+> authentication anywhere. Use it only against tokens you own or are
+> authorized to test.
 
-## Commands
-
-It lists all the packages (applications) installed on an Android device or emulator.
+## Install
 
 ```bash
-adb shell pm list packages
+python -m venv venv
+source venv/bin/activate      # Windows: venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-It is primarily used to find the file path of an installed app's APK on an Android device or emulator.
+## Usage
 
 ```bash
-adb shell pm path <package-name>
+python jwt_analyzer.py <token>
+python jwt_analyzer.py --file token.txt
+echo "<token>" | python jwt_analyzer.py
+python jwt_analyzer.py <token> --json
+python jwt_analyzer.py <token> --wordlist my_wordlist.txt
+python jwt_analyzer.py <token> --no-color
 ```
 
-The command is used to start an activity within an Android application directly from the command line. The adb shell am command utilizes the Android Activity Manager (AM) to perform actions on the Android system, and start specifically launching an activity.
+Exit codes: `0` = no HIGH-risk findings, `1` = HIGH risk, `2` = token could
+not be parsed. This makes it easy to drop into a CI pipeline.
 
-```bash
-adb shell am start <package-name/.activity-name>
+## What it checks
 
-Example: Androgoat Vulnerable Application
-package name = "owasp.sat.agoat" and activity = "AccessControl1ViewActivity"
+| Check | Severity | Notes |
+|---|---|---|
+| `alg: none` | HIGH | Unsigned token — anyone can forge claims |
+| Weak/common HMAC secret | HIGH | Brute-forced against `common_secrets.txt` for HS256/384/512 only |
+| Suspicious `kid` header | MEDIUM | Chars suggesting path traversal / SQLi / command injection |
+| `jku` / `jwk` in header | MEDIUM | Verifier may trust an attacker-supplied key source |
+| Missing `exp` | MEDIUM | Token never expires |
+| Sensitive fields in payload | MEDIUM | Payload is base64, not encrypted — anyone can read it |
+| Long-lived token (>30 days) | LOW | Increases blast radius of a leaked token |
+| Missing `iat` | LOW | Hurts auditability |
+| Asymmetric algorithm in use | INFO | Reminder to check for HS256/RS256 confusion (CVE-2015-9235-class) |
+| Authorization fields present | INFO | Reminder that server must still re-check permissions |
 
-adb shell am start owasp.sat.agoat/.AccessControl1ViewActivity
+Overall risk = HIGH / MEDIUM / LOW / INFO based on a weighted sum of finding
+severities (HIGH=3, MEDIUM=2, LOW=1, INFO=0; ≥6 → HIGH, ≥3 → MEDIUM, ≥1 → LOW).
+
+## Project structure
+
+```
+jwt-security-analyzer/
+├── jwt_analyzer.py     # CLI entry point, report/JSON output
+├── analyzer.py         # Orchestrates checks, risk scoring, remediation text
+├── checks.py           # Individual security checks
+├── utils.py            # Unverified decode helpers
+├── common_secrets.txt  # Wordlist for the weak-secret check
+├── requirements.txt
+└── sample_tokens/      # Example tokens for trying the tool out
 ```
 
-It is used in Android development to copy files from an Android device to your computer.
+## Example
 
-```bash
-adb pull <file-name>
+```
+$ python jwt_analyzer.py "$(cat sample_tokens/weak_secret_and_pii.txt)"
+============================================================
+JWT SECURITY ANALYSIS REPORT
+============================================================
+
+Header:
+{
+  "alg": "HS256",
+  "typ": "JWT"
+}
+
+Payload:
+{
+  "sub": "12345",
+  "email": "admin@example.com",
+  "role": "admin"
+}
+
+Findings: (5)
+  [MEDIUM] Expiration claim (exp) is missing
+  [LOW] Issued-at claim (iat) is missing
+  [MEDIUM] Potentially sensitive data in payload: email
+  [INFO] Authorization-relevant fields present in payload: role
+  [HIGH] Signature verifies against a common/weak secret ('secret')
+
+Overall Risk: HIGH
+
+Recommendations:
+  - Always set an 'exp' claim with a short, appropriate lifetime.
+  - Include an 'iat' claim for auditability and replay-window analysis.
+  - Remove PII/secrets from the payload; store an opaque user/session ID and look up sensitive data server-side.
+  - Re-validate authorization server-side against a trusted source rather than trusting claims in the token alone.
+  - Rotate the signing secret; use a cryptographically random secret of at least 32 bytes (e.g. secrets.token_bytes(32)).
 ```
 
-It allows developers to copy files from their local machine to an Android device or an emulator.
+## Possible extensions
 
-```bash
-adb push <file-name>
-```
+- Flask/HTML report export
+- OWASP Top 10 / ASVS mapping per finding
+- Support for testing `jku`/`x5u` allow-list bypass scenarios in a lab setup
+- Docker image + REST API wrapper
+- CI GitHub Action that fails a build on HIGH-risk tokens in test fixtures
 
-It is used to retrieve the CPU architecture of an Android device.
+## Disclaimer
 
-```bash
-adb shell getprop ro.product.cpu.abi 
-```
-
-This command allows users to perform actions that require elevated permissions, such as accessing system directories, modifying system files, or executing commands that are typically restricted to the root user.
-
-```bash
-adb root
-```
-
-It is used to install an APK file onto an Android device from a computer.
-
-```bash
-adb install example.apk
-```
-This command is used to uninstall an APK file from an Android device or emulator.
-
-
-```bash
-adb uninstall <package-name>
-```
-
-It is used to display all running processes.
-
-```bash
-ps -A
-```
-
-This command is used to terminate a process by its process ID (PID).
-
-```bash
-kill <PID>
-```
-
-## SSL Pinning Bypass Methods
-
-### Method 1: Using Objection
-
-- Automate using objection.
-
-```bash
-objection patchapk --source example.apk
-```
-
-### Method 2: Using Frida Server and Frida Script
-
-- Frida Server and Frida Script
-- (Note: The Frida server must be located in `/data/local/tmp/`. Also, ensure to add the Burpsuite CA certificate in the tmp folder as `cert-der.crt`.)
-- Now, provide execute permissions to the Frida server and run the server.
-- Download the ssl bypass script from https://codeshare.frida.re/.
-- After running the Frida server, execute the following command.
-
-```bash
-frida -U -f <package-name> -l </path/frida-script.js>
-```
-
-### Method 3: Using Objection and Frida Server
-
-- Using Objection and Frida Server
-- After running the Frida server, execute the following command.
-
-```bash
-objection --gadget <package-name> explore --startup-command "android sslpinning disable"
-```
-
-### Method 4: Manual Decompilation
-
-1. Decompile the APK file using apktool.
-2. Inject the Frida gadget.
-
-## Root Detection Bypass Methods
-
-### Method 1: Using Magisk and Zygisk
-
-1. Install Magisk on your device.
-2. Use the Zygisk module to hide root detection.
-
-### Method 2: Using Frida Scripts
-
-Download root detection bypass scripts from https://codeshare.frida.re/
-
+For educational and authorized security-testing use only. Only analyze
+tokens you own or have explicit permission to test.

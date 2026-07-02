@@ -109,8 +109,8 @@ Recommendations:
 - OWASP Top 10 / ASVS mapping per finding
 - Support for testing `jku`/`x5u` allow-list bypass scenarios in a lab setup
 - Docker image + REST API wrapper
--->
 - CI GitHub Action that fails a build on HIGH-risk tokens in test fixtures
+-->
 
 ## Disclaimer
 

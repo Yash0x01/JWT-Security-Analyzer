@@ -102,13 +102,14 @@ Recommendations:
   - Re-validate authorization server-side against a trusted source rather than trusting claims in the token alone.
   - Rotate the signing secret; use a cryptographically random secret of at least 32 bytes (e.g. secrets.token_bytes(32)).
 ```
-
+<!--
 ## Possible extensions
 
 - Flask/HTML report export
 - OWASP Top 10 / ASVS mapping per finding
 - Support for testing `jku`/`x5u` allow-list bypass scenarios in a lab setup
 - Docker image + REST API wrapper
+-->
 - CI GitHub Action that fails a build on HIGH-risk tokens in test fixtures
 
 ## Disclaimer
